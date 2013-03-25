@@ -1,3 +1,14 @@
-from distutils.core import setup, Extension
-setup(name="__Survival", version="1.0",
-      ext_modules=[Extension("__Survival", ["__Survival.c"])])
+def configuration(parent_package='', top_path=None):
+    import numpy
+    from numpy.distutils.misc_util import Configuration
+
+    config = Configuration('_Survival_directory',
+                           parent_package,
+                           top_path)
+    config.add_extension('_Survival', ['_Survival.c'], extra_compile_args=['-O0'])
+
+    return config
+
+if __name__ == "__main__":
+    from numpy.distutils.core import setup
+    setup(configuration=configuration)

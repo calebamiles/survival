@@ -9,7 +9,7 @@ from math import log
 import random as rand
 import numpy
 from itertools import izip
-
+import _Survival
 
 class Event(object):
     '''Represents a single event that can happen once.  The typical example is death.
@@ -135,6 +135,7 @@ def ConstantHazardMultiEventObservation(name, hazard, period, observed = False, 
         return result
     
     __logp = numpy.vectorize(multievent_logp,otypes=[MultiEvent])
+    #__logp = numpy.frompyfunc(multievent_logp, 3, 1)
     
     def logp(value, hazard, period):
         '''
@@ -252,3 +253,97 @@ def ConstantHazardEventObservation(name, hazard, period, observed = False, value
                              plot = True,
                              verbose = 0)
     return result
+    
+# The above with C calls
+class EventProposer_C(pymc.Metropolis):
+    '''
+    Simple proposal distribution for Event objects for use in Metropolis samplers.
+    '''
+    def __init__(self, stochastic, *args, **kwargs):
+        return super(self.__class__, self).__init__(stochastic, *args, **kwargs)
+    
+    def propose(self):
+        tau = 1./(self.adaptive_scale_factor * self.proposal_sd)**2
+        time = pymc.rnormal(self.stochastic.value.time, tau)
+        censored = rand.random() > 0.5
+        self.stochastic.value = _Survival._event(time, censored)
+    
+    def competence(self, stochastic):
+        if stochastic.dtype == _Survival._event:
+            return 3
+        else:
+            return 0
+    
+class MultiEventProposer_C(pymc.Metropolis):
+    '''
+    Simple proposal distribution for MultiEvent objects for use in Metropolis samplers.
+    '''
+    def __init__(self, stochastic, *args, **kwargs):
+        return super(self.__class__, self).__init__(stochastic, *args, **kwargs)
+    
+    def propose(self):
+        tau = 1./(self.adaptive_scale_factor * self.proposal_sd)**2
+        time = pymc.rnormal(self.stochastic.value.time, tau)
+        n = pymc.rnormal(len(self.stochastic.value), tau)
+        if n <= 0:
+            n = 0
+        times = [rand.random() for _ in range(n)]
+        total = float(sum(times))
+        times = [item*time/total for item in times]
+        events = [_Survival._event(time=item, censored=False) for item in times]
+        events = numpy.array(events)
+        self.stochastic.value = _Survival._multiEvent(events)
+    
+    def competence(self, stochastic):
+        if stochastic.dtype == _Survival._multiEvent:
+            return 3
+        else:
+            return 0
+
+def ConstantHazardMultiEventObservation_C(name, hazard, period, observed = False, value = None):
+    '''
+    Create a pymc Stochastic representing a Poisson process.  The values produced are 
+    MultiEvent objects.
+    '''
+     
+    dtype = _Survival._multiEvent
+    
+    #Create the pymc Stochastic object
+    result = pymc.Stochastic(logp = _Survival._multiEvent_logp,
+                             doc = 'A constant hazard survival time node for multiple events.',
+                             name = name,
+                             parents = {'hazard':hazard,'period':period},
+                             random = _Survival._multiEvent_random,
+                             trace = True,
+                             value = value,
+                             dtype = dtype,
+                             rseed = 1,
+                             observed = observed,
+                             cache_depth = 2,
+                             plot = False,
+                             verbose = 0)
+    return result
+
+def ConstantHazardEventObservation_C(name, hazard, period, observed = False, value = None):
+    '''
+    Create a pymc Stochastic representing a constant hazard failure process.  The values
+    produced are Event objects.
+    '''
+    
+    dtype = _Survival._event
+    
+    result = pymc.Stochastic(logp = _Survival._event_logp,
+                             doc = 'A constant hazard survival time node for single events.',
+                             name = name,
+                             parents = {'hazard':hazard,'period':period},
+                             random = _Survival._event_random,
+                             trace = True,
+                             value = value,
+                             dtype = dtype,
+                             rseed = 1,
+                             observed = observed,
+                             cache_depth = 2,
+                             plot = False,
+                             verbose = 1)
+    return result
+
